@@ -1,0 +1,779 @@
+#lang racket
+
+(require (planet "sicp.ss" ("soegaard" "sicp.plt" 2 1)))
+
+(define (smallest-divisor n)
+  (find-divisor n 2))
+
+(define (find-divisor n test)
+  (define (next x)
+    (if (= x 2) 
+        3
+        (+ x 2)))
+  (cond ((> (square test) n) n)
+        ((divides? n test) test)
+        (else (find-divisor n (next test)))))
+
+(define (divides? a b)
+  (= (remainder a b) 0))
+
+(define (prime? n)
+  (= (smallest-divisor n) n))
+
+
+(define (average a b)
+  (/ (+ a b) 2))
+
+(define (gcd a b)
+  (if (= b 0)
+      a
+      (gcd b (remainder a b))))
+
+(define (abs a)
+  (if (>= a 0)
+      a
+      (- a)))
+
+(define (exp base power)
+  (if (= power 0)
+      1
+      (* base (exp base (- power 1)))))
+
+(define (logb base num)
+  (/ (log num) (log base)))
+
+(define (make-rat n d)
+  (let ((g (abs (gcd n d)))
+        (pos-n (> n 0))
+        (pos-d (> d 0)))
+    (cond ((and pos-n pos-d) (cons (/ n g) (/ d g)))
+          ((and (not pos-n) (not pos-d)) (cons (/ (- n) g) (/ (- d) g)))
+          (else (cons (/ (- (abs n)) g) 
+                      (/ (abs d) g))))))
+ 
+
+(define (numer x)
+  (car x))
+(define (denom x)
+  (cdr x))
+(define (print-rat x)
+  (display (numer x))
+  (display "/")
+  (display (denom x)))
+
+(define one-half (make-rat 1 2))
+(define one-third (make-rat 1 3))
+
+
+(define (add-rat x y)
+  (make-rat (+ (* (numer x) (denom y))
+               (* (numer y) (denom x)))
+            (* (denom x) (denom y))))
+
+(define (sub-rat x y)
+  (make-rat (- (* (numer x) (denom y))
+               (* (numer y) (denom x)))
+            (* (denom x) (denom y))))
+
+(define (mul-rat x y)
+  (make-rat (* (numer x) (numer y))
+            (* (denom x) (denom y))))
+
+(define (div-rat x y)
+  (make-rat (* (numer x) (denom y))
+            (* (numer y) (denom x))))
+
+(define (equal-rat? x y)
+  (= (* (numer x) (denom y))
+     (* (numer y) (denom x))))
+
+;; ex 2.2
+
+
+(define (start-segment s)
+  (car s))
+
+(define (end-segment s)
+  (cdr s))
+
+(define (make-point x y)
+  (cons x y))
+
+(define (x-point point)
+  (car point))
+
+(define (y-point point)
+  (cdr point))
+
+(define (midpoint-segment segment)
+  (let ((start-point (start-segment segment))
+        (end-point (end-segment segment)))
+    (make-point (average (x-point start-point)
+                         (x-point end-point))
+                (average (y-point start-point)
+                         (y-point end-point)))))
+
+(define (print-point p)
+  (newline)
+  (display "(")
+  (display (x-point p))
+  (display ",")
+  (display (y-point p))
+  (display ")"))
+
+(define pa (make-point 0 0))
+(define pb (make-point 2 2))
+
+(define (make-rectangle top-left length width)
+  (cons top-left (cons length width)))
+
+(define (top-left rect)
+  (car rect))
+
+(define (length-rect rect)
+  (car (cdr rect)))
+
+(define (width rect)
+  (cdr (cdr rect)))
+
+(define (area rect)
+  (* (length rect) (width rect)))
+
+(define (perimeter rect)
+  (+ (* 2 (length-rect rect)) (* 2 (width rect))))
+
+(define (my-cons x y)
+  (lambda (p) (p x y)))
+
+(define (my-car z)
+  (z (lambda (a b) a)))
+
+(define (my-cdr z)
+  (z (lambda (a b) b)))
+
+(define (int-cons a b)
+  (* (exp 2 a) (exp 3 b)))
+
+(define (int-car z)
+  (count-divides z 2))
+
+(define (int-cdr z)
+  (count-divides z 3))
+
+(define (count-divides num div)
+  (define (iter left cnt)
+    (if (= (remainder left div) 0)
+        (iter (/ left div) (+ cnt 1))
+        cnt))
+  (iter num 0))
+
+(define zero (lambda (f) (lambda (x) x)))
+
+(define (add-1 n)
+  (lambda (f) (lambda (x) (f ((n f) x)))))
+
+(define one (lambda (f) (lambda (x) (f x))))
+
+(define two (lambda (f) (lambda (x) (f (f x)))))
+
+(define (square x) (* x x))
+
+(define (add-church m n)
+  (lambda (f) 
+    (lambda (x) ((n f) ((m f) x)))))
+
+;; 2.1.4 Interval Arithmetic
+
+(define (make-interval a b) (cons a b))
+
+(define (lower-bound interval)
+  (car interval))
+
+(define (upper-bound interval)
+  (cdr interval))
+
+(define (percent interval)
+  (let ((high (upper-bound interval))
+        (low (lower-bound interval)))
+    (/ (/ (- high low)
+          2)
+       (average high low)))) 
+  
+(define (add-interval x y)
+  (make-interval (+ (lower-bound x) (lower-bound y))
+                 (+ (upper-bound x) (upper-bound y))))
+
+(define (sub-interval x y)
+  (make-interval (- (lower-bound x) (upper-bound y))
+                 (- (upper-bound x) (lower-bound y))))
+
+(define (mul-interval x y)
+  (let ((p1 (* (lower-bound x) (lower-bound y)))
+        (p2 (* (lower-bound x) (upper-bound y)))
+        (p3 (* (upper-bound x) (lower-bound y)))
+        (p4 (* (upper-bound x) (lower-bound y))))
+    (make-interval (min p1 p2 p3 p4)
+                   (max p1 p2 p3 p4))))
+
+(define (div-interval x y)
+  (if (and (< (lower-bound y) 0)
+           (> (upper-bound y) 0))
+      (error "Cannot divide by interval spanning 0")
+      (mul-interval x
+                    (make-interval (/ 1.0 (upper-bound y))
+                                   (/ 1.0 (lower-bound y))))))
+
+(define (make-centre-percent centre percent)
+  (make-interval (- centre (* centre percent))
+                 (+ centre (* centre percent))))
+
+(define (par1 r1 r2)
+  (div-interval (mul-interval r1 r2)
+                (add-interval r1 r2)))
+(define (par2 r1 r2)
+  (let ((one (make-interval 1 1))) 
+    (div-interval one
+                  (add-interval (div-interval one r1)
+                                (div-interval one r2)))))
+
+
+;; 2.2
+
+(define nil '())
+            
+(define (list-ref items n)
+  (if (= n 0)
+      (car items)
+      (list-ref (cdr items) (- n 1))))
+
+(define (my-length items)
+  (if (null? items)
+      0
+      (+ 1 (length (cdr items)))))
+                                                      
+                    
+(define (my-append l1 l2)
+  (if (empty? l1)
+      l2
+      (cons (car l1) (append (cdr l1) l2))))
+
+(define (last-pair li)
+  (if (empty? (cdr li))
+      li
+      (last-pair (cdr li))))
+
+(define (my-reverse li)
+  (if (empty? li)
+      li
+      (my-append (my-reverse (cdr li)) (list (car li)))))
+
+(define us-coins (list 50 25 10 5 1))
+(define uk-coins (list 100 50 20 10 5 2 1 0.5))
+
+(define no-more? empty?)
+
+(define except-first-denomination cdr)
+
+(define first-denomination car)
+
+(define (cc amount coin-values)
+  (cond ((= amount 0) 1)
+        ((or (< amount 0) (no-more? coin-values)) 0)
+        (else
+         (+ (cc amount
+                (except-first-denomination coin-values))
+            (cc (- amount
+                   (first-denomination coin-values))
+                coin-values)))))
+
+(define (same-parity head . tail)
+  (if (even? head)
+      (filter even? (cons head tail))
+      (filter odd? (cons head tail))))
+
+(define (scale-list items factor)
+  (if (null? items)
+      nil
+      (cons (* (car items) factor)
+            (scale-list (cdr items) factor))))
+
+(define (my-map proc items)
+  (if (empty? items)
+      items
+      (cons (proc (car items))
+            (my-map proc (cdr items)))))
+
+(define (square-list-1 items)
+  (if (empty? items)
+      nil
+      (cons (square (car items)) (square-list-1 (cdr items)))))
+
+(define (square-list-2 items)
+  (map square items))
+
+(define (square-list-3 items)
+  (define (iter things answer)
+    (if (empty? things)
+        answer
+        (iter (cdr things)
+              (cons (square (car things))
+                    answer))))
+  (iter items nil))
+
+
+(define (count-leaves tree)
+  (cond ((pair? tree) (+ (count-leaves (car tree))
+                        (count-leaves (cdr tree))))
+        ((empty? tree) 0)
+        (else 1)))
+
+(define (reverse li)
+  (if (empty? li)
+      li
+      (append (reverse (cdr li)) (list (car li)))))
+
+(define (deep-reverse li)
+  (cond ((empty? li) li)
+        ((not (pair? li)) li)
+        (else (append (deep-reverse (cdr li)) (list (deep-reverse (car li)))))))
+
+(define (fringe li)
+  (cond ((empty? li) li)
+        ((not (pair? li)) (list li))
+        (else (append (fringe (car li)) (fringe (cdr li))))))
+
+(define (make-mobile left right)
+  (cons left right))
+
+(define (make-branch length structure)
+  (cons length structure))
+
+(define (left-branch mobile)
+  (car mobile))
+
+(define (right-branch mobile)
+  (cdr mobile))
+
+(define (branch-length branch)
+  (car branch))
+
+(define (branch-structure branch)
+  (cdr branch))
+
+(define (total-weight mobile)
+  (if (pair? mobile)
+      (let ((left (left-branch mobile))
+            (right (right-branch mobile)))
+        (+ (if (pair? (branch-structure left))
+               (total-weight (branch-structure left))
+               (branch-structure left))
+           (if (pair? (branch-structure right))
+               (total-weight (branch-structure right))
+               (branch-structure right))))
+      mobile))
+
+(define (structure? mobile) (pair? mobile))
+
+(define (balanced? mobile)
+  (if (not (structure? mobile))
+      #t
+      (let ((l-branch (left-branch mobile))
+            (r-branch (right-branch mobile)))
+        (and (= (* (branch-length l-branch)
+                   (total-weight (branch-structure l-branch)))
+                (* (branch-length r-branch)
+                   (total-weight (branch-structure r-branch))))
+             (balanced? (branch-structure l-branch))
+             (balanced? (branch-structure r-branch))))))
+    
+
+(define (scale-tree tree factor)
+  (cond ((null? tree) nil)
+        ((not (pair? tree)) (* tree factor))
+        (else (cons (scale-tree (car tree) factor)
+                    (scale-tree (cdr tree) factor)))))
+
+(define (scale-tree-map tree factor)
+  (map (lambda (sub-tree)
+         (if (pair? sub-tree)
+             (scale-tree-map sub-tree factor)
+             (* sub-tree factor)))
+       tree))
+
+(define (square-tree tree)
+  (cond ((null? tree) nil)
+        ((pair? tree) (cons (square-tree (car tree)) (square-tree (cdr tree))))
+        (else (square tree))))
+
+(define (square-tree-map tree)
+  (map (lambda (sub-tree)
+         (if (pair? sub-tree)
+             (square-tree-map sub-tree)
+             (square sub-tree)))
+       tree))
+
+(define (tree-map fn tree)
+  (map (lambda (sub-tree)
+         (if (pair? sub-tree)
+             (tree-map fn sub-tree)
+             (fn sub-tree)))
+       tree))
+
+(define (subsets s)
+  (if (empty? s)
+      (list nil)
+      (let ((rest (subsets (cdr s))))
+        (append (map (lambda (a-subset)
+                       (cons (car s) a-subset))
+                     rest)
+                rest))))
+                      
+
+(define (my-filter fn li)
+  (if (empty? li)
+      nil
+      (if (fn (car li))
+          (cons (car li) (my-filter fn (rest li)))
+          (my-filter fn (rest li)))))
+
+(define (accumulate op initial sequence)
+  (if (null? sequence)
+      initial
+      (op (car sequence)
+          (accumulate op initial (cdr sequence)))))
+
+(define (enumerate-interval low high)
+  (if (> low high)
+      nil
+      (cons low (enumerate-interval (+ 1 low) high))))
+
+(define (enumerate-leaves tree)
+  (cond ((empty? tree) nil)
+        ((pair? tree) (append (enumerate-leaves (car tree))
+                              (enumerate-leaves (cdr tree))))
+        (else (list tree))))
+
+(define (sum-odd-squares tree)
+  (accumulate +
+              0
+              (map square (filter odd? (enumerate-leaves tree)))))
+               
+
+(define (my-map-2 p sequence)
+  (accumulate (lambda (x y) (cons (p x) y)) nil sequence))
+                
+(define (my-append-2 seq1 seq2)
+  (accumulate cons seq2 seq1))
+
+(define (my-length-2 sequence)
+  (accumulate (lambda (x y) (+ 1 y)) 0 sequence))
+
+(define (horner-eval x coeff-sequence)
+  (accumulate (lambda (this-coeff higher-terms) (+ (* higher-terms x) this-coeff))
+              0
+              coeff-sequence))
+
+(define (count-leaves-acc tree)
+  (accumulate (lambda (leaf-count total-count) (+ leaf-count total-count))
+              0 
+              (map (lambda (sub-tree)
+                     (if (pair? sub-tree)
+                         (count-leaves-acc sub-tree)
+                         1))
+                   tree)))
+
+(define (accumulate-n op init seqs)
+  (if (null? (car seqs))
+      nil
+      (cons (accumulate op init (map (lambda (seq) (car seq)) seqs))
+            (accumulate-n op init (map (lambda (seq) (cdr seq))
+                                       seqs)))))
+
+(define (leaves tree)
+  (cond ((empty? tree) nil)
+        ((not (pair? tree)) (list tree))
+        (else (append (leaves (car tree)) (leaves (cdr tree))))))
+
+(define (dot-product v w)
+  (accumulate + 0 (map * v w)))
+
+(define (matrix-*-vector m v)
+  (map (lambda (row) (dot-product v row)) m))
+
+(define (transpose mat)
+  (accumulate-n cons '() mat))
+
+(define (matrix-*-matrix m n)
+  (let ((cols (transpose n))
+        (rows m))
+    (map (lambda (row) 
+           (map (lambda (col) (dot-product row col))
+                cols))
+         rows)))
+
+(define fold-right accumulate)
+
+(define (fold-left op initial sequence)
+  (define (iter result rest)
+    (if (empty? rest)
+        result
+        (iter (op result (car rest))
+              (cdr rest))))
+  (iter initial sequence))
+
+(define (r-reverse sequence)
+  (fold-right (lambda (x y) (append y (list x))) nil sequence))
+  
+(define (l-reverse sequence)
+  (fold-left (lambda (x y) (cons y x))
+             nil 
+             sequence))
+
+(define (flatmap proc seq)
+  (accumulate append nil (map proc seq)))
+         
+(define (prime-sum? pair)
+  (prime? (+ (car pair) (cadr pair))))
+
+(define (make-pair-sum pair)
+  (list (car pair) (cadr pair) (+ (car pair) (cadr pair))))
+
+(define (prime-sum-pairs n)
+  (map make-pair-sum
+       (filter prime-sum?
+               (flatmap
+                (lambda (i)
+                  (map (lambda (j) (list i j))
+                       (enumerate-interval 1 (- i 1))))
+                (enumerate-interval 1 n)))))
+
+(define (all-pairs n)
+  (flatmap (lambda (k) 
+             (map (lambda (l) (list l k))
+                  (enumerate-interval 1 (- k 1))))
+           (enumerate-interval 1 n)))
+
+(define (prime-pairs n)
+  (map (lambda (prime-pair) (list (first prime-pair) 
+                                  (second prime-pair)
+                                  (+ (first prime-pair)
+                                     (second prime-pair))))
+       (filter (lambda (pair) (prime? (+ (first pair) (second pair)))) (all-pairs n))))
+
+(define (remove itm seq)
+  (filter (lambda (x) (not (= itm x))) seq))
+
+(define (permutations seq)
+  (if (empty? seq)
+      (list nil)
+      (flatmap (lambda (x) (map (lambda (p) (cons x p)) 
+                            (permutations (remove x seq))))
+           seq)))
+
+(define (triplet-sum n s)
+  (filter (lambda (triplet) (= (+ (first triplet)
+                                  (second triplet)
+                                  (third triplet))
+                               s))
+          (unique-triplets n)))
+
+(define (unique-triplets n)
+  (flatmap (lambda (i)
+             (flatmap (lambda (j) 
+                        (map (lambda (k) (list i j k))
+                             (enumerate-interval 1 (- j 1))))
+                      (enumerate-interval 1 (- i 1)))) 
+           (enumerate-interval 1 n)))
+
+(define (print-board positions)
+  (let ((size (length positions)))
+    (define (get-row k)
+      (map (lambda (col)
+             (if (queen-at k col) 'X 'O))
+       (enumerate-interval 1 size)))
+    (define (queen-at row col)
+      (let ((result (filter (lambda (pos)
+                              (and (= (car pos) row) (= (cadr pos) col)))
+                            positions)))
+        (> (length result) 0)))
+    (define (display-row k)
+      (display (get-row k))
+      (newline))
+    (for ((i (enumerate-interval 1 size)))
+      (display-row i))))
+                     
+(define (make-position row col)
+  (cons row col))
+
+(define (position-row pos)
+  (car pos))
+
+(define (position-col pos)
+  (cdr pos))
+
+(define (position-equal pos1 pos2)
+  (equal? pos1 pos2))
+
+(define empty-board '())
+
+(define (adjoin-position row col positions)
+  (append positions (list (make-position row col))))
+
+(define (attacks? a b)
+  (let ((a-row (position-row a))
+        (a-col (position-col a))
+        (b-row (position-row b))
+        (b-col (position-col b)))
+    (cond ((= a-row b-row) #t) ;same row
+          ((= a-col b-col) #t) ;same col
+          ((= (abs (- a-col b-col)) ;same diagonal
+              (abs (- a-row b-row))) #t)
+          (else #f))))
+
+(define (nth idx li)
+  (if (= idx 1)
+      (car li)
+      (nth (- idx 1) (cdr li))))
+  
+(define (safe? k positions)
+  (let ((kth-pos (nth k positions)))
+    (empty? (filter (lambda (pos)
+                      (and (not (position-equal pos kth-pos))
+                           (attacks? pos kth-pos)))
+                    positions))))
+
+(define (queens board-size)
+  (define (queen-cols k)  
+    (if (= k 0)
+        (list empty-board)
+        (filter
+         (lambda (positions) (safe? k positions))
+         (flatmap
+          (lambda (rest-of-queens)
+            (map (lambda (new-row)
+                   (adjoin-position new-row k rest-of-queens))
+                 (enumerate-interval 1 board-size)))
+          (queen-cols (- k 1))))))
+  (queen-cols board-size))
+
+(define (flipped-pairs painter)
+  (let ((painter2 (beside painter (flip-vert painter))))
+    (below painter2 painter2)))
+
+(define (right-split painter n)
+  (if (= n 0)
+      painter
+      (let ((smaller (right-split painter (- n 1))))
+        (beside painter (below smaller smaller)))))
+
+(define (up-split painter n)
+  (if (= n 0)
+      painter
+      (let ((smaller (up-split painter (- n 1))))
+        (below painter (beside smaller smaller)))))
+
+(define (corner-split painter n)
+  (if (= n 0)
+      painter
+      (let ((up (up-split painter (- n 1)))
+            (right (right-split painter (- n 1))))
+        (let ((top-left (beside up up))
+              (bottom-right (below right right))
+              (corner (corner-split painter (- n 1))))
+              (beside (below painter top-left)
+                      (below bottom-right corner))))))
+
+(define (square-limit painter n)
+  (let ((quarter (corner-split painter n)))
+    (let ((half (beside (flip-horiz quarter) quarter)))
+      (below (flip-vert half) half))))
+
+(define (square-of-four tl tr bl br)
+  (lambda (painter)
+    (let ((top (beside (tl painter) (tr painter)))
+          (bottom (beside (bl painter) (br painter))))
+      (below bottom top))))
+
+(define (identity p) p)
+
+(define fp (square-of-four identity flip-vert identity flip-vert))
+
+(define (square-limit-1 painter n)
+  (let ((combine4 (square-of-four flip-horiz identity
+                                  rotate180 flip-vert)))
+    (combine4 (corner-split painter n))))
+
+(define (split send-orig send-new)
+  (lambda (painter)
+    (let ((new-split (send-new painter painter)))
+      (send-orig painter new-split))))
+          
+(define (my-frame-coord-map frame)
+  (lambda (v)
+    (add-vect
+     (origin-frame frame)
+     (add-vect (scale-vect (xcor-vect v)
+                           (edge1-frame frame))
+               (scale-vect (ycor-vect v)
+                           (edge2-frame frame))))))
+
+(define (my-make-vect x y)
+  (cons x y))
+
+(define (xcor-vect v)
+  (car v))
+
+(define (ycor-vect v)
+  (cdr v))
+
+(define (add-vect v1 v2)
+  (make-vect (+ (xcor-vect v1)
+                (xcor-vect v2))
+             (+ (ycor-vect v1)
+                (ycor-vect v2))))
+
+(define (sub-vect v1 v2)
+  (make-vect (- (xcor-vect v1)
+                (xcor-vect v2))
+             (- (ycor-vect v1)
+                (ycor-vect v2))))
+
+(define (scale-vect v s)
+  (make-vect (* (xcor-vect v)
+                s))
+             (* (ycor-vect v)
+                s))
+
+(define (my-make-frame origin edge1 edge2)
+  (list origin edge1 edge2))
+
+(define (origin-frame frame)
+  (car frame))
+
+(define (edge1-frame frame)
+  (cadr frame))
+
+(define (edge2-frame frame)
+  (caddr frame))
+          
+(define (my-make-segment v1 v2)
+  (cons v1 v2))
+
+(define (my-start-segment segment)
+  (car segment))
+
+(define (my-end-segment segment)
+  (cdr segment))
+
+(define frame-painter
+  (segments->painter (list (make-segment (make-vect 0 0)
+                                         (make-vect 0 1))
+                           (make-segment (make-vect 0 0)
+                                         (make-vect 1 0))
+                           (make-segment (make-vect 0 1)
+                                         (make-vect 1 1))
+                           (make-segment (make-vect 1 0)
+                                         (make-vect 1 1)))))
+                                         
+                            
+

@@ -1,0 +1,307 @@
+#lang racket
+
+(define (my-memq sym li)
+  (cond ((empty? li) #f)
+        ((eq? (car li) sym) li)
+        (else (my-memq sym (cdr li)))))
+
+(define (my-equal? a b)
+  (if (and (pair? a) (pair? b)) 
+      (and (eq? (car a)
+                (car b))
+           (equal? (cdr a)
+                   (cdr b)))
+      (eq? a b)))
+        
+;; Symbolic Differentitation System
+
+(define variable? symbol?)
+
+(define (same-variable? v1 v2)
+  (and (variable? v1) (variable? v2) (eq? v1 v2)))
+
+(define (=number? exp num)
+  (and (number? exp) (= exp num)))
+
+(define (make-sum a1 a2) 
+  (cond ((=number? a1 0) a2)
+        ((=number? a2 0) a1)
+        ((and (number? a1) (number? a2)) (+ a1 a2))
+        (else (list a1 '+ a2))))
+
+(define (sum? x) (and (pair? x) (eq? (cadr x) '+)))
+
+(define (make-product m1 m2)
+  (cond ((or (=number? m1 0) (=number? m2 0)) 0)
+        ((=number? m1 1) m2)
+        ((=number? m2 1) m1)
+        ((and (number? m1) (number? m2)) (* m1 m2))
+        (else (list m1 '* m2))))
+
+(define (product? x) (and (pair? x) (eq? (cadr x) '*)))
+
+(define (addend x) (car x))
+
+(define (augend x) (caddr x))
+
+(define (multiplier x) (car x))
+
+(define (multiplicand x) (caddr x))
+
+(define (make-exponentiation base exponent)
+  (cond ((= exponent 0) 1)
+        ((= exponent 1) base)
+        ((and (number? base) (number? exp)) (expt base exponent))
+        (else (list '** base exponent))))
+
+(define (base exp)
+  (cadr exp))
+
+(define (exponent exp)
+  (caddr exp))
+
+(define (exponentiation? exp)
+  (and (pair? exp) (eq? (car exp) '**)))
+
+(define (deriv exp var)
+  (cond ((number? exp) 0)
+        ((variable? exp)
+         (if (same-variable? exp var) 1 0))
+        ((sum? exp)
+         (make-sum (deriv (addend exp) var)
+                   (deriv (augend exp) var)))
+        ((product? exp)
+         (make-sum (make-product (multiplier exp)
+                                 (deriv (multiplicand exp) var))
+                   (make-product (deriv (multiplier exp) var)
+                                 (multiplicand exp))))
+        ((exponentiation? exp)
+         (make-product (make-product (exponent exp)
+                                     (make-exponentiation (base exp)
+                                                          (make-sum (exponent exp)
+                                                                    -1)))
+                       (deriv (base exp) var)))
+        (else (error "unknown expression type -- DERIV" exp))))
+
+#| Unordered representation of sets
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((equal? x (car set)) true)
+        (else (element-of-set? x (cdr set)))))
+
+(define (adjoin-set x set)
+  (if (element-of-set? x set)
+      set
+      (cons x set)))
+
+(define (intersection-set set1 set2)
+  (cond ((or (null? set1) (null? set2)) '())
+        ((element-of-set? (car set1) set2)
+         (cons (car set1)
+               (intersection-set (cdr set1) set2)))
+        (else (intersection-set (cdr set1) set2))))
+
+(define (union-set set1 set2)
+  (cond ((null? set1) set2)
+        ((element-of-set? (car set1) set2) (union-set (cdr set1) set2))
+        (else (cons (car set1) (union-set (cdr set1) set2)))))
+
+
+|#
+#|
+; Ordered list representation of sets
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((= x (car set)) true)
+        ((< x (car set)) false)
+        (else (element-of-set? x (cdr set)))))
+
+(define (intersection-set set1 set2)
+  (if (or (null? set1) (null? set2))
+      '()
+      (let ((x1 (car set1)) 
+            (x2 (car set2)))
+        (cond ((= x1 x2) 
+               (cons x1 (intersection-set (cdr set1)
+                                          (cdr set2))))
+              ((< x1 x2) (intersection-set (cdr set1)
+                                           set2))
+              ((< x2 x1) (intersection-set set1
+                                           (cdr set2)))))))
+(define (adjoin-set x set)
+  (cond ((null? set) (list x))
+        ((< x (car set)) (cons x set))
+        ((= x (car set)) set)
+        (else (cons (car set) (adjoin-set x (cdr set))))))
+
+(define (union-set set1 set2)
+  (cond ((empty? set1) set2)
+        ((empty? set2) set1)
+        (else (let ((x1 (car set1))
+                    (x2 (car set2)))
+                (cond ((= x1 x2) (cons x1 (union-set (cdr set1) (cdr set2))))
+                      ((< x1 x2) (cons x1 (union-set (cdr set1) set2)))
+                      ((< x2 x1) (cons x2 (union-set set1 (cdr set2)))))))))
+
+|#
+
+#|
+Binary Tree repr. of sets
+
+(define (entry tree) (car tree))
+(define (left-branch tree) (cadr tree))
+(define (right-branch tree) (caddr tree))
+(define (make-tree entry left right)
+  (list entry left right))
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((= x (entry set)) true)
+        ((< x (entry set)) (element-of-set? x (left-branch set)))
+        ((> x (entry set) (element-of-set? x (right-branch set))))))
+
+(define (adjoin-set x set)
+  (cond ((null? set) (make-tree x '() '()))
+        ((= x (entry set)) set)
+        ((< x (entry set))
+         (make-tree (entry set)
+                    (adjoin-set x (left-branch set))
+                    (right-branch set)))
+        ((> x (entry set))
+         (make-tree (entry set)
+                    (left-branch set)
+                    (adjoin-set x (right-branch set))))))
+
+(define (tree->list-1 tree)
+  (if (null? tree)
+      '()
+      (append (tree->list-1 (left-branch tree))
+              (cons (entry tree)
+                    (tree->list-1 (right-branch tree))))))
+
+(define (tree->list-2 tree)
+  (define (copy-to-list tree result-list)
+    (if (null? tree)
+        result-list
+        (copy-to-list (left-branch tree)
+                      (cons (entry tree)
+                            (copy-to-list (right-branch tree)
+                                          result-list)))))
+  (copy-to-list tree '()))
+|#
+
+;; constructors + selectors
+(define (make-leaf symbol weight)
+  (list 'leaf symbol weight))
+
+(define (leaf? object)
+  (eq? (car object) 'leaf))
+
+(define (symbol-leaf x) (cadr x))
+
+(define (weight-leaf x) (caddr x))
+
+(define (make-code-tree left right)
+  (list left
+        right
+        (append (symbols left) 
+                (symbols right))
+        (+ (weight left) (weight right))))
+
+(define (left-branch tree) (car tree))
+
+(define (right-branch tree) (cadr tree))
+
+;; helper functions
+(define (symbols tree)
+  (if (leaf? tree)
+      (list (symbol-leaf tree))
+      (caddr tree)))
+
+(define (weight tree)
+  (if (leaf? tree)
+      (weight-leaf tree)
+      (cadddr tree)))
+
+;; API
+(define (decode bits tree)
+  (define (decode-1 bits current-branch)
+    (if (null? bits)
+        '()
+        (let ((next-branch
+               (choose-branch (car bits) current-branch)))
+          (if (leaf? next-branch)
+              (cons (symbol-leaf next-branch)
+                    (decode-1 (cdr bits) tree))
+              (decode-1 (cdr bits) next-branch)))))
+  (decode-1 bits tree))
+
+(define (choose-branch bit branch)
+  (cond ((= bit 0) (left-branch branch))
+        ((= bit 1) (right-branch branch))
+        (else (error "Bad bit -- CHOOSE-BRANCH" bit))))
+
+(define (adjoin-set x set)
+  (cond ((null? set) (list x))
+        ((< (weight x) (weight (car set))) (cons x set))
+        (else (cons (car set)
+                    (adjoin-set x (cdr set))))))
+
+(define (make-leaf-set pairs)
+  (if (null? pairs)
+      '()
+      (let ((pair (car pairs)))
+        (adjoin-set (make-leaf (car pair)    ;symbol 
+                               (cadr pair))  ;frequency
+                    (make-leaf-set (cdr pairs))))))
+
+(define sample-tree
+  (make-code-tree (make-leaf 'A 4)
+                  (make-code-tree
+                   (make-leaf 'B 2)
+                   (make-code-tree (make-leaf 'D 1)
+                                   (make-leaf 'C 1)))))
+
+(define sample-message '(0 1 1 0 0 1 0 1 0 1 1 0))
+
+(define (encode message tree)
+  (if (null? message)
+      '()
+      (append (encode-symbol (car message) tree)
+              (encode (cdr message) tree))))
+
+(define (encode-symbol sym tree)
+  (if (not (member sym (symbols tree)))
+      (error "encode-symbol: unknown symbol for encoding tree" sym)
+      (if (leaf? tree)
+          '()
+          (let ((left-symbols (symbols (left-branch tree)))
+                (right-symbols (symbols (right-branch tree))))
+            (if (member sym left-symbols)
+                (cons 0 (encode-symbol sym (left-branch tree)))
+                (cons 1 (encode-symbol sym (right-branch tree))))))))
+
+(define (generate-huffman-tree pairs)
+  (successive-merge (make-leaf-set pairs)))
+
+(define (successive-merge forest)
+  (if (= (length forest) 1)
+      (car forest) ;take it out of a set
+      (successive-merge (adjoin-set (make-code-tree (car forest) (cadr forest))
+                                    (cddr forest)))))
+
+#|
+A	2	NA	16
+BOOM	1	SHA	3
+GET	2	YIP	9
+JOB	2	WAH	1
+|#
+
+(define rock-tree (generate-huffman-tree '((A 2) (BOOM 1) (GET 2) (JOB 2) (NA 16) (SHA 3) (YIP 9) (WAH 1))))
+
+(define rock-lyrics '(GET A JOB SHA NA NA NA NA NA NA NA NA GET A JOB SHA NA NA NA NA NA NA NA NA WAH YIP YIP YIP YIP YIP YIP SHA BOOM))
+
+
+

@@ -1,0 +1,329 @@
+#lang racket
+
+(define nil '())
+
+(define (square x) (* x x))
+
+(define (sum-of-squares x y) (+ (square x) (square y)))
+
+(define (abs x)
+  (cond ((> x 0) x)
+        (else (- x))))
+
+(define (sum-of-square-2-of-3 x y z)
+  (+ (square (if (> x y) x y))
+     (square (if (> (if (> x y) y x)
+                    z)
+                 (if (> x y) y x)
+                 z))))
+
+(define (newton-sqrt guess x)
+  (let ((improved-guess (improve-sqrt guess x)))
+    (if (good-enough? guess improved-guess)
+        guess
+        (newton-sqrt improved-guess x))))
+
+(define (improve-sqrt guess x)
+  (/ (+ guess (/ x guess))
+     2))
+
+(define (good-enough? guess x)
+  (let ((ratio (/ guess x)))
+    (and (> ratio .999) (< ratio 1.001))))
+
+(define (newton-crt guess x)
+  (let ((improved-guess (improve-crt guess x)))
+    (if (good-enough? guess improved-guess)
+        guess
+        (newton-crt improved-guess x))))
+
+(define (improve-crt guess x)
+  (/ (+ (/ x (square guess)) 
+        (* 2 guess))
+     3))
+
+(define (count-change amount)
+  (cc amount 5))
+
+(define (cc amount coins)
+  (cond ((= amount 0) 1)
+        ((< amount 0) 0)
+        ((= coins 0) 0)
+        (else (+ (cc amount (- coins 1))
+                 (cc (- amount (first-denom coins))
+                     coins)))))
+
+(define (first-denom coins)
+  (cond ((= coins 5) 50)
+        ((= coins 4) 25)
+        ((= coins 3) 10)
+        ((= coins 2) 5)
+        ((= coins 1) 1)))
+
+;f(n) = n if n<3 and f(n) = f(n - 1) + 2f(n - 2) + 3f(n - 3)
+
+(define (f-rec n)
+  (if (< n 3)
+      n
+      (+ (f-rec (- n 1))
+         (* 2 (f-rec (- n 2)))
+         (* 3 (f-rec (- n 3))))))
+
+(define (f-iter n)
+  (define (f-aux a b c count)
+    (cond ((< n 3) n)
+          ((= n count) a)
+          (else (f-aux (+ a (* b 2) (* c 3))
+                       a
+                       b
+                       (+ count 1)))))
+  (f-aux 2 1 0 2))
+
+(define (pascal row col)
+  (if (or (= row col) 
+          (= col 1)
+          (= row 1))
+      1
+      (+ (pascal (- row 1) col)
+         (pascal (- row 1) (- col 1)))))
+
+(define (expt b n)
+  (if (= n 0)
+      1
+      (* b (expt b (- n 1)))))
+
+(define (expt-iter b n prod)
+  (if (= n 0)
+      prod
+      (expt-iter b (- n 1) (* prod b))))
+
+(define (fast-expt b n)
+  (cond ((= n 0) 1)
+        ((even? n) (square (fast-expt b (/ n 2))))
+        (else (* b (fast-expt b (- n 1))))))
+
+(define (fast-expt-iter b n acc)
+  (cond ((= n 0) acc)
+        ((even? n) (fast-expt-iter (square b) (/ n 2) acc))
+        ((odd? n) (fast-expt-iter b (- n 1) (* acc b)))))
+
+(define (fast-mult a b)
+  (cond ((= b 0) 0)
+        ((= b 1) a)
+        ((even? b) (fast-mult ((* 2 a)) (halve b)))
+        ((odd? b) (+ a (fast-mult a (- b 1))))))
+
+(define (halve a) (/ a 2))
+  
+(define (fast-mult-iter a b acc)
+  (cond ((= b 0) acc)
+        ((even? b) (fast-mult-iter ((* a 2)) (halve b) acc))
+        ((odd? b) (fast-mult-iter a (- b 1) (+ acc a)))))
+
+(define (gcd a b)
+  (if (= b 0)
+      a
+      (gcd b (remainder a b))))
+
+(define (smallest-divisor n)
+  (find-divisor n 2))
+
+(define (find-divisor n test)
+  (define (next x)
+    (if (= x 2) 
+        3
+        (+ x 2)))
+  (cond ((> (square test) n) n)
+        ((divides? n test) test)
+        (else (find-divisor n (next test)))))
+
+
+
+(define (divides? a b)
+  (= (remainder a b) 0))
+
+(define (prime? n)
+  (= (smallest-divisor n) n))
+
+(define (timed-prime-test n)
+  (display "Testing...")
+  (display n)
+  (newline)
+  (if (time (prime? n))
+      (begin (display "prime!\n ") #t)
+      (begin (display "not prime!\n ") #f)))
+
+(define (find-primes n cnt primes)
+  (cond ((= cnt 0) primes)
+        (else (if (timed-prime-test n)
+                  (find-primes (+ n 1) (- cnt 1) (cons n primes))
+                  (find-primes (+ n 1) cnt primes)))))
+
+(define (expmod base exp m)
+  (cond ((= exp 0) 1)
+        ((even? exp)
+         (remainder (square (expmod base (/ exp 2) m))
+                    m))
+        (else
+         (remainder (* base (expmod base (- exp 1) m))
+                    m))))
+;; 1.3
+
+(define (id x) x)
+(define (inc x) (+ x 1))
+
+(define (sum term a next b)
+  (if (> a b)
+      0
+      (+ (term a)
+         (sum term (next a) next b))))
+
+(define (sum-cubes a b)
+  (sum (lambda (x) (* x x x))
+       a
+       (lambda (x) (+ 1 x))
+       b))
+
+(define (integral f a b dx)
+  (define (add-dx x) (+ x dx))
+  (* (sum f (+ a (/ dx 2.0)) add-dx b)
+     dx))
+
+(define (simpson f a b n)
+  (define h (/ (- b a) n))
+  (define (simpson-term k)
+    (* (f (+ a (* k h)))
+       (cond ((or (= k 1) (= k n)) 1)
+             ((odd? k) 4)
+             ((even? k) 2))))
+  (* (sum simpson-term
+          0
+          (lambda (x) (+ x 1))
+          n)
+      (/ h 3)))
+
+(define (sum-iter term a next b)
+  (define (iter a result)
+    (if (> a b)
+        result
+        (iter (next a) (+ (term a) result))))
+  (iter a 0))
+
+(define (product term a next b)
+  (if (> a b)
+      1
+      (* (term a) (product term (next a) next b))))
+
+(define (accumulate combiner null-value term a next b)
+  (if (> a b)
+      null-value
+      (combiner (term a) 
+                (accumulate combiner null-value term (next a) next b))))
+
+(define (accumulate-iter combiner null-value term a next b)
+  (define (iter a result)
+    (if (> a b)
+        result
+        (iter (next a) (combiner result (term a)))))
+  (iter a null-value))
+    
+
+(define (sum-a term a next b)
+  (accumulate + 0 term a next b))
+
+(define (product-a term a next b)
+  (accumulate * 1 term a next b))
+
+(define (filtered-accumulate combiner null-value filter term a next b)
+  (cond ((> a b) null-value)
+        ((filter a) (combiner (term a) 
+                              (filtered-accumulate combiner 
+                                                   null-value
+                                                   filter
+                                                   term
+                                                   (next a)
+                                                   next 
+                                                   b)))
+        (else (filtered-accumulate combiner
+                                   null-value
+                                   filter
+                                   term
+                                   (next a)
+                                   next
+                                   b))))
+
+(define (sum-squares-prime a b)
+  (filtered-accumulate + 0 prime? square a inc b))
+
+(define (prod-rel-prime n)
+  (filtered-accumulate * 1 (lambda (x) (= (gcd x n) 1)) id 1 inc n))
+
+(define (f x y)
+  ((lambda (a b)
+    (+ (* x (square a))
+       (* y b)
+       (* a b)))
+   (+ 1 (* x y))
+   (- 1 y)))
+
+;; 1.3.3
+
+(define (average a b)
+  (/ (+ a b) 2))
+
+(define (close-enough? a b)
+  (< (abs (- a b)) .0001))
+
+(define (search f neg-point pos-point)
+  (let ((mid-point (average neg-point pos-point)))
+    (if (close-enough? neg-point pos-point)
+        mid-point
+        (let ((test-value (f mid-point)))
+          (cond ((positive? test-value) (search f neg-point mid-point))
+                ((negative? test-value) (search f mid-point pos-point))
+                (else mid-point))))))
+
+(define (half-interval-method f a b)
+  (let ((value-a (f a))
+        (value-b (f b)))
+    (cond ((and (< value-a 0) (> value-b 0)) (search f a b))
+          ((and (< value-b 0) (> value-a 0)) (search f b a))
+          (else (error "Values are not opposite signs")))))
+
+(define tolerance .00001)
+(define (fixed-point f first-guess)
+  (define (close-enough? v1 v2)
+    (< (abs (- v1 v2)) tolerance))
+    (define (try guess)
+      (let ((next (f guess)))
+        (if (close-enough? guess next)
+            next
+            (try next))))
+  (try first-guess))
+
+(define (sqrt-fp x)
+  (fixed-point (lambda (y) (average y (/ x y))) 1.0))
+
+(define (average-damp f)
+  (lambda (x) (average (f x) x)))
+
+(define (sqrt-b x)
+  (fixed-point (average-damp (lambda (y) (/ x y)))))
+
+(define (iterative-improve good-enough? improve)
+  (define (try guess)
+    (if (good-enough? guess)
+        guess
+        (try (improve guess))))
+  try)
+
+(define (fp f initial-guess) 
+  ((iterative-improve (lambda (guess) 
+                        (< (abs (- guess (f guess)))
+                           .0001))
+                      f) 
+   initial-guess))
+
+
+    
+  

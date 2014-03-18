@@ -1,0 +1,485 @@
+#lang racket
+
+(define (eval. exp env)
+  (cond ((self-evaluating? exp) exp)
+        ((variable? exp) (lookup-variable-value exp env))
+        ((quoted? exp) (text-of-quotation exp))
+        ((assignment? exp) (eval-assignment exp env))
+        ((definition? exp) (eval-definition exp env))
+        ((if? exp) (eval-if exp env))
+        ((lambda? exp)
+         (make-procedure (lambda-parameters exp)
+                         (lambda-body exp)
+                         env))
+        ((begin? exp) 
+         (eval-sequence (begin-actions exp) env))
+        ((cond? exp) (eval. (cond->if exp) env))
+        ((and? exp) (eval-and exp env))
+        ((or? exp) (eval-or exp env))
+        ((let? exp) (eval. (let->combination exp) env))
+        ((application? exp)
+         (apply.  (eval. (operator exp) env)
+                (list-of-values (operands exp) env)))
+        (else
+         (error "Unknown expression type -- EVAL" exp))))
+
+(define (apply.  procedure arguments)
+  (cond ((primitive-procedure? procedure)
+         (apply-primitive-procedure procedure arguments))
+        ((compound-procedure? procedure)
+         (eval-sequence
+           (procedure-body procedure)
+           (extend-environment
+             (mlist (procedure-parameters procedure))
+             (mlist arguments)
+             (procedure-environment procedure))))
+        (else
+         (error
+          "Unknown procedure type -- APPLY" procedure))))
+
+(define (list-of-values exps env)
+  (if (no-operands? exps)
+      '()
+      (cons (eval. (first-operand exps) env)
+            (list-of-values (rest-operands exps) env))))
+
+(define (eval-if exp env)
+  (if (true? (eval. (if-predicate exp) env))
+      (eval. (if-consequent exp) env)
+      (eval. (if-alternative exp) env)))
+
+(define (eval-sequence exps env)
+  (cond ((last-exp? exps) (eval. (first-exp exps) env))
+        (else (eval. (first-exp exps) env)
+              (eval-sequence (rest-exps exps) env))))
+
+(define (eval-assignment exp env)
+  (set-variable-value! (assignment-variable exp)
+                       (eval. (assignment-value exp) env)
+                       env)
+  'ok)
+
+(define (eval-definition exp env)
+  (define-variable! (definition-variable exp)
+                    (eval. (definition-value exp) env)
+                    env)
+  'ok)
+
+
+; Internal functions
+
+;; Procedures
+
+(define (make-procedure parameters body env)
+  (list 'procedure parameters (scan-out-defines body) env))
+(define (compound-procedure? p)
+  (tagged-list? p 'procedure))
+(define (procedure-parameters p) (second p))
+(define (procedure-body p) (third p))
+(define (procedure-environment p) (fourth p))
+
+(define (scan-out-defines proc-body)
+  (let ((define-statements (filter (lambda (exp) (tagged-list? exp 'define)) 
+                                   proc-body))
+        (other-statements (filter (lambda (exp) (not (tagged-list? exp 'define)))
+                                  proc-body)))
+    (make-let (map (lambda (def-stmt) (list (definition-variable def-stmt) '*unassigned*))
+                   define-statements)
+              (append (map (lambda (def-stmt) (cons 'set! (cdr def-stmt))) define-statements)
+                      other-statements))))
+
+;; Environment
+
+(define (mlength mlist)
+  (if (empty? mlist)
+      0
+      (+ 1 (mlength (mcdr mlist)))))
+
+(define (mlist li)
+  (if (empty? li)
+      '()
+      (mcons (car li) (mlist (cdr li)))))
+
+(define (enclosing-environment env) (mcdr env))
+(define (first-frame env) (mcar env))
+(define the-empty-environment '())
+
+;; Frames defined as '((var1 var2 var3) (val1 val2 val3))
+
+(define (make-frame variables values)
+  (mcons variables values))
+(define (frame-variables frame) (mcar frame))
+(define (frame-values frame) (mcdr frame))
+(define (add-binding-to-frame! var val frame)
+  (set-mcar! frame (mcons var (mcar frame)))
+  (set-mcdr! frame (mcons val (mcdr frame))))
+
+(define (extend-environment vars vals base-env)
+  (if (= (mlength vars) (mlength vals))
+      (mcons (make-frame vars vals) base-env)
+      (if (< (mlength vars) (mlength vals))
+          (error "Too many arguments supplied" vars vals)
+          (error "Too few arguments supplied" vars vals))))
+
+; Returns a frame that contains that var
+(define (scan-env-for var env)
+  (cond ((eq? env the-empty-environment) '())
+        ((not (empty? (scan-frame-for var (first-frame env)))) (first-frame env))
+        (else (scan-env-for var (enclosing-environment env)))))
+
+; Returns a pair of lists (vars/vals) with the desired var at the front
+(define (scan-frame-for var frame)
+  (define (scan vars vals)
+    (cond ((or (empty? vars) (empty? vals)) '())
+          ((eq? var (mcar vars)) (list vars vals))
+          (else (scan (mcdr vars) (mcdr vals)))))
+  (let ((vars (frame-variables frame))
+        (vals (frame-values frame)))
+    (scan vars vals)))
+
+(define (lookup-variable-value var env)
+  (let ((frame (scan-env-for var env)))
+    (if (empty? frame)
+        (error "Unbound variable")
+        (let ((value (mcar (second (scan-frame-for var frame)))))
+          (if (eq? value '*unassigned*)
+              (error "Unbound variable")
+              value)))))
+
+(define (set-variable-value! var val env)
+  (let ((frame (scan-env-for var env)))
+    (if (empty? frame)
+        (error "Unbound variable")
+        (let* ((vars-vals-list (scan-frame-for var frame))
+               (vars (first vars-vals-list))
+               (vals (second vars-vals-list)))
+          (set-mcar! vals val)))))
+
+(define (define-variable! var val env)
+  (let ((vars-vals-list (scan-frame-for var (first-frame env))))
+    (if (empty? vars-vals-list)
+        (add-binding-to-frame! var val (first-frame env))
+        (let ((vars (first vars-vals-list))
+              (vals (second vars-vals-list)))
+          (set-mcar! vals val)))))
+
+(define (unbind-variable! var frame)
+  (define (scan-and-unbind vars vals)
+    ; Return the list of vars and vals without the binding for var
+    (cond ((or (empty? vars) (empty? vals)) (list '() '()))
+          ((eq? (mcar vars) var) 
+           (list (mcdr vars) (mcdr vals)))
+          (else (let* ((result (scan-and-unbind (mcdr vars) (mcdr vals)))
+                       (new-vars (first result))
+                       (new-vals (second result)))
+                  (list (mcons (mcar vars) new-vars)
+                        (mcons (mcar vals) new-vals))))))
+  (let ((vars (frame-variables frame))
+        (vals (frame-values frame)))
+    (if (or (empty? vars) (empty? vals))
+        frame
+        (let* ((vars-vals-list (scan-and-unbind vars vals))
+               (vars (first vars-vals-list))
+               (vals (second vars-vals-list)))
+          (set-mcar! frame vars)
+          (set-mcdr! frame vals)))))
+
+(define (make-unbound! var env)
+  (let ((frame (scan-env-for var env)))
+    (if (empty? frame)
+        (error "Already unbound")
+        (unbind-variable! var frame))))
+
+;; Eval Logic
+
+(define (true? bool)
+  (not (eq? bool false)))
+(define (false? bool)
+  (eq? bool false))
+
+(define (and? exp)
+  (tagged-list? exp 'and))
+
+(define(or? exp)
+  (tagged-list? exp 'or))
+
+(define (eval-and exp env)
+  (define (do-and-eval. clauses)
+    (if (empty? (cdr clauses))
+        (eval. (car clauses) env)
+        (if (true? (eval. (car clauses) env))
+            (do-and-eval. (cdr clauses))
+            #f)))
+  (let ((clauses (and-clauses exp)))
+    (if (empty? clauses)
+        #t
+        (do-and-eval. clauses))))
+                
+(define (and-clauses exp)
+  (cdr exp))
+(define (or-clauses exp)
+  (cdr exp))
+
+(define (eval-or exp env)
+  (define (do-or-eval. clauses)
+    (if (empty? (cdr clauses))
+        (eval. (car clauses) env)
+        (if (false? (eval. (car clauses) env))
+            (do-or-eval. (cdr clauses))
+            (eval. (car clauses) env))))
+  (let ((clauses (or-clauses exp)))
+    (if (empty? clauses)
+        #f
+        (do-or-eval. clauses))))
+
+
+(define (self-evaluating? exp)
+  (cond ((number? exp) true)
+        ((string? exp) true)
+        (else false)))
+
+(define (variable? exp)
+  (symbol? exp))
+
+(define (quoted? exp)
+  (tagged-list? exp 'quote))
+
+(define (text-of-quotation exp)
+  (cadr exp))
+
+(define (tagged-list? exp tag)
+  (if (pair? exp)
+      (eq? (car exp) tag)
+      #f))
+
+(define (assignment? exp)
+  (tagged-list? exp 'set!))
+(define (assignment-variable exp) (cadr exp))
+(define (assignment-value exp) (caddr exp))
+
+(define (definition? exp)
+  (tagged-list? exp 'define))
+
+(define (definition-variable exp)
+  (if (symbol? (cadr exp)) ;func def
+      (cadr exp)
+      (caadr exp)))
+
+(define (definition-value exp)
+  (if (symbol? (cadr exp))
+      (caddr exp)
+      (make-lambda (cdadr exp)    ;formal parameters
+                   (cddr exp))))  ; body
+
+(define (lambda? exp)
+  (tagged-list? exp 'lambda))
+(define (lambda-parameters exp)
+  (cadr exp))
+(define (lambda-body exp)
+  (cddr exp))
+
+(define (make-lambda parameters body)
+  (cons 'lambda
+        (cons parameters
+              body)))
+
+(define (if? exp)
+  (tagged-list? exp 'if))
+(define (if-predicate exp)
+  (cadr exp))
+(define (if-consequent exp)
+  (caddr exp))
+(define (if-alternative exp)
+  (if (not (null? (cadddr exp)))
+      (cadddr exp)
+      #f))
+(define (make-if predicate consquent alternative)
+  (list 'if predicate consquent alternative))
+(define (make-application procedure . arguments)
+  (cons procedure arguments))
+
+(define (begin? exp) (tagged-list? exp 'begin))
+(define (begin-actions exp) (cdr exp))
+(define (last-exp? seq) (null? (cdr seq)))
+(define (first-exp seq) (car seq))
+(define (rest-exps seq) (cdr seq))
+
+(define (sequence->exp seq)
+  (cond ((null? seq) seq)
+        ((last-exp? seq) (first-exp seq))
+        (else (make-begin seq))))
+(define (make-begin seq) (cons 'begin seq))
+
+(define (application? exp) (pair? exp))
+(define (operator exp) (car exp))
+(define (operands exp) (cdr exp))
+(define (no-operands? ops) (null? ops))
+(define (first-operand ops) (car ops))
+(define (rest-operands ops) (cdr ops))
+
+(define (cond? exp) (tagged-list? exp 'cond))
+(define (cond-clauses exp) (cdr exp))
+(define (cond-else-clause? clause)
+  (eq? (cond-predicate clause) 'else))
+(define (cond-=>-clause? clause)
+  (eq? (second clause) '=>))
+(define (cond-predicate clause) (car clause))
+(define (cond-actions clause) (cdr clause))
+(define (cond->if exp)
+  (expand-clauses (cond-clauses exp)))
+  
+(define (expand-clauses clauses)
+  (if (null? clauses)
+      'false
+      (let ((first (car clauses))
+            (rest (cdr clauses)))
+        (if (cond-else-clause? first)
+            (if (null? rest)
+                (sequence->exp (cond-actions first))
+                (error "ELSE clause isn't last -- COND->IF"
+                       clauses))
+            (make-if (cond-predicate first)
+                     (if (cond-=>-clause? first)
+                         (make-application (caddr first) (cond-predicate first))
+                         (sequence->exp (cond-actions first)))
+                     (expand-clauses rest))))))
+
+(define (let? exp)
+  (tagged-list? exp 'let))
+(define (named-let? exp)
+  (and (let? exp) (not (pair? (cadr exp)))))
+(define (let-name exp)
+  (cadr exp))
+(define (let-definitions exp)
+  (if (named-let? exp)
+      (caddr exp)
+      (cadr exp)))
+(define (let-variables exp)
+  (map car (let-definitions exp)))
+(define (let-values exp)
+  (map cadr (let-definitions exp)))
+(define (let-body exp)
+  (if (named-let? exp)
+      (cdddr exp)
+      (cddr exp)))
+
+(define (let->combination exp)
+  (let ((expanded-let (cons (make-lambda (let-variables exp) (let-body exp))
+                            (let-values exp))))
+    (if (named-let? exp)
+        (sequence->exp (list (cons 'define 
+                                   (cons (cons (let-name exp) (let-variables exp))
+                                         (let-body exp)))
+                             expanded-let))
+        expanded-let)))
+
+
+(define (make-let definitions body)
+  (cons 'let (cons definitions body)))
+
+(define (let*? exp)
+  (tagged-list? exp 'let*))
+(define (let*-definitions exp)
+  (let-definitions exp))
+(define (let*-variables exp)
+  (let-variables exp))
+(define (let*-values exp)
+  (let-values exp))
+(define (let*-body exp)
+  (let-body exp))
+(define (let*->nested-lets exp)
+  (define (expand-let* definitions body)
+    (if (empty? definitions)
+        body
+        (list (make-let (list (car definitions))
+                  (expand-let* (cdr definitions) body)))))
+  (car (expand-let* (let*-definitions exp)
+                    (let*-body exp))))
+
+(define (for? exp)
+  (tagged-list? exp 'for))
+(define (for-init-value exp)
+  (second (second exp)))
+(define (for-init-var exp)
+  (first (second exp)))
+(define (init-value init)
+  (second init))
+(define (for-guard exp)
+  (third exp))
+(define (for-body exp)
+  (fourth exp))
+(define (for-step exp)
+  (fifth exp))
+(define (for->exp exp)
+  (let ((temp-function-name (gensym)))
+    (sequence->exp (list (list 'define
+                               (list temp-function-name
+                                     (for-init-var exp))
+                               (make-if (for-guard exp)
+                                        (sequence->exp (list (for-body exp)
+                                                             (list temp-function-name (list (for-step exp) 
+                                                                                            (for-init-var exp)))))
+                                        ''done))
+                         (list temp-function-name (for-init-value exp))))))
+
+(define (primitive-procedure? proc)
+  (tagged-list? proc 'primitive))
+
+(define (primitive-implementation proc) (cadr proc))
+
+(define primitive-procedures
+         (list (list 'car car)
+               (list 'cdr cdr)
+               (list 'cons cons)
+               (list 'null? null?)
+               (list '+ +)
+               (list '- -)
+               (list '* *)
+               (list '/ /)
+               ))
+
+(define (primitive-procedure-names)
+  (mlist (map car primitive-procedures)))
+
+(define (primitive-procedure-objects)
+  (mlist (map (lambda (proc) (list 'primitive (cadr proc)))
+              primitive-procedures)))
+
+(define (apply-primitive-procedure proc args)
+  (apply (primitive-implementation proc) args))
+
+(define input-prompt ";;; M-Eval input:")
+(define output-prompt ";;; M-Eval value:")
+(define (driver-loop)
+  (prompt-for-input input-prompt)
+  (let ((input (read)))
+    (let ((output (eval. input the-global-environment)))
+      (annouce-output output-prompt)
+      (user-print output)))
+    (driver-loop))
+(define (prompt-for-input string)
+  (newline) (newline) (display string) (newline))
+
+(define (annouce-output string)
+  (newline) (display string) (newline))
+
+(define (user-print object)
+  (if (compound-procedure? object)
+      (display (list 'compound-procedure
+                     (procedure-parameters object)
+                     (procedure-body object)
+                     '<procedure-env>))
+      (display object)))
+
+(define (setup-environment)
+  (let ((initial-env
+         (extend-environment (primitive-procedure-names)
+                             (primitive-procedure-objects)
+                             the-empty-environment)))
+    (define-variable! 'true true initial-env)
+    (define-variable! 'false false initial-env)
+    initial-env))
+
+(define the-global-environment (setup-environment))
+
+;(eval. '(let ((a 'unassigned)) (define a 2)) the-global-environment)

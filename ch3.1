@@ -1,0 +1,452 @@
+#lang racket
+
+(define balance 100)
+
+(define (withdraw amount)
+  (if (> balance amount)
+      (begin (set! balance (- balance amount))
+             balance)
+      (error "Insufficient Funds!")))
+
+(define new-withdraw
+  (let ((balance 100))
+    (lambda (amount)
+      (if (> balance amount)
+          (begin (set! balance (- balance amount))
+                 balance)
+      (error "Insufficient balance" balance)))))
+
+(define (make-withdraw balance)
+  (lambda (amount)
+    (if (< amount balance)
+        (begin (set! balance (- balance amount))
+               balance)
+        (error "Insufficient Funds!" balance))))
+
+(define (make-account balance)
+  (define (withdraw amount)
+    (if (>= balance amount)
+        (begin (set! balance (- balance amount))
+               balance)
+        (error "Insufficient Funds!")))
+  (define (deposit amount)
+    (set! balance (+ balance amount))
+    balance)
+  (define (dispatch m)
+    (cond ((eq? m 'withdraw) withdraw)
+          ((eq? m 'deposit) deposit)
+          (else (error "Unknown request -- MAKE-ACCOUNT" m))))
+  dispatch)
+
+(define (make-accumulator count)
+  (lambda (incr)
+    (begin (set! count (+ count incr))
+           count)))
+
+(define (make-monitored proc)
+  (let ((call-count 0))
+    (lambda (arg)
+      (cond ((eq? arg 'how-many-calls?) call-count)
+            ((eq? arg 'reset-count) (set! call-count 0))
+            (else (begin (set! call-count (+ call-count 1))
+                         (proc arg)))))))
+
+(define (make-secret-account password balance)
+  (define (withdraw amount)
+    (if (<= amount balance)
+        (begin (set! balance (- balance amount))
+               balance)
+        (error "Insufficient funds." balance)))
+  (define (deposit amount)
+    (set! balance (+ amount balance))
+    balance)
+  (let ((attempts 0))
+    (define (dispatch pw m)
+      (if (eq? pw password)
+          (cond ((eq? m 'withdraw) withdraw)
+                ((eq? m 'deposit) deposit)
+                (else (error "Error - Unknown operation" m)))
+          (begin (set! attempts (+ attempts 1))
+                 (if (= attempts 7)
+                     (error "Call the cops!")
+                     (error "Incorrect password")))))
+    dispatch))
+
+(define (make-joint secret-account account-password new-password)
+  (lambda (pw m)
+    (if (eq? pw new-password)
+        (secret-account account-password m)
+        (error "Incorrect password"))))
+
+(define (random-in-range low high)
+  (let ((range (- high low)))
+    (+ low (* (random) range))))
+
+(define (monte-carlo trials-count experiment)
+  (define (iter trials-left trials-passed)
+    (cond ((= trials-left 0) (/ trials-passed trials-count))
+          ((experiment) (iter (- trials-left 1) (+ trials-passed 1)))
+          (else (iter (- trials-left 1) trials-passed))))
+  (iter trials-count 0))
+
+(define (estimate-pi trials)
+  (sqrt (/ 6 (monte-carlo trials cesaro-test))))
+
+(define (cesaro-test)
+  (= (gcd (random-in-range 1 1000000000) (random-in-range 1 1000000000)) 1))
+
+
+;; Monte Carlo integrator
+
+(define (integrate-mc predicate x1 x2 y1 y2)
+  (let ((integral-test
+               (lambda ()
+                 (let ((rand-x (random-in-range x1 x2))
+                       (rand-y (random-in-range y1 y2)))
+                   (predicate rand-x rand-y))))
+        (rectangle-area (* (- x2 x1)
+                           (- y2 y1))))
+    (* (monte-carlo 100000 integral-test) rectangle-area)))
+
+(define (pseudo-random init)
+  (define (dispatch sym)
+    (cond ((eq? sym 'generate) init)
+          ((eq? sym 'reset) (lambda (new-init)
+                              (set! init new-init)))
+          (else (error "No such operation"))))
+  dispatch)
+
+(define rand (pseudo-random 5))
+
+(define (factorial n)
+  (define (iter counter product)
+    (if (> counter n)
+        product
+        (iter (+ counter 1) (* product counter))))
+  (iter 1 1))
+
+(define (factorial-mutation n)
+  (let ((product 1)
+        (counter 1))
+    (define (iter)
+      (if (> counter n)
+          product
+          (begin (set! product (* product counter))
+                 (set! counter (+ counter 1))
+                 (iter))))
+    (iter)))
+
+(define foo
+  (let ((prev-arg 0)
+        (this-arg 0))
+    (lambda (x)
+      (set! prev-arg this-arg)
+      (set! this-arg x)
+      prev-arg)))
+
+(define (mlist . args)
+  (if (empty? args)
+      '()
+      (mcons (car args) (apply mlist (cdr args)))))
+
+(define (mlast-pair mlist)
+  (if (mpair? mlist)
+      (if (empty? (mcdr mlist))
+          mlist
+          (mlast-pair (mcdr mlist)))
+      (error "Not a mpair")))
+
+(define (mappend! x y)
+  (set-mcdr! (mlast-pair x) y)
+  x)
+
+(define (make-cycle x)
+  (set-mcdr! (mlast-pair x) x)
+  x)
+
+(define (count-pairs x)
+  (if (not (mpair? x))
+      0
+      (+ (count-pairs (mcar x))
+         (count-pairs (mcdr x))
+         1)))
+
+(define (correct-count-pairs x)
+  (let ((seen '()))
+    (define (iter x)
+      (if (not (mpair? x))
+          0
+          (+ 1
+             (if (mmemq (mcar x) seen) 
+                 0 
+                 (begin 
+                   (set! seen (mcons (mcar x) seen))
+                   (iter (mcar x))))
+             (if (mmemq (mcdr x) seen)
+                 0
+                 (begin
+                   (set! seen (mcons (mcdr x) seen))
+                   (iter (mcdr x)))))))
+    (iter x)))
+
+(define (mmemq elt mlist)
+  (cond ((empty? mlist) #f)
+        ((eq? elt (mcar mlist)) mlist)
+        (else (mmemq elt (mcdr mlist)))))
+           
+        
+
+(define a (mcons 1 2))
+(define b (mcons 2 3))
+(define c (mcons 3 4))
+
+(set-mcar! a b)
+(set-mcdr! a b)
+(set-mcar! b c)
+(set-mcdr! b c)
+(set-mcdr! c a)
+
+(define (loop-structure? x)
+  (define (iter x seen)
+    (cond ((empty? x) #f)
+          ((not (mpair? x)) #f)
+          ((or (mmemq (mcar x) seen)
+               (mmemq (mcdr x) seen))
+           #t)
+          (else (or (iter (mcar x) (mcons x seen))
+                    (iter (mcdr x) (mcons x seen))))))
+  (iter x '()))
+
+#|
+(define (cons x y)
+  (define (set-x! v) (set! x v))
+  (define (set-y! v) (set! y v))
+  (define (dispatch m)
+    (cond ((eq? m 'car) x)
+          ((eq? m 'cdr) y)
+          ((eq? m 'set-car!) set-x!)
+          ((eq? m 'set-cdr!) set-y!)
+          (else (error "Undefined operation"))))
+  dispatch)
+
+(define (car z) (z 'car))
+(define (cdr z) (z 'cdr))
+(define (set-car! z value) ((z 'set-car!) value))
+(define (set-cdr! z value) ((z 'set-cdr!) value))
+|#
+
+  
+#|
+
+(define (make-queue) (mcons '() '()))
+(define (front-queue q) (mcar (mcar q)))
+(define (empty-queue? q) (empty? (mcar q)))
+
+(define (insert-queue! q item)
+  (let ((new-pair (mlist item)))
+    (if (empty-queue? q)
+        (begin (set-mcar! q new-pair)
+               (set-mcdr! q new-pair)
+               q)
+        (let ((prev-last-pair (mcdr q)))
+          (begin (set-mcdr! prev-last-pair new-pair)
+                 (set-mcdr! q new-pair)
+                 q)))))
+
+(define (delete-queue! q)
+  (if (empty-queue? q)
+      q
+      (if (eq? (mcar q) (mcdr q)) ;We have reached the end
+          (begin (set-mcar! q '())
+                 (set-mcdr! q '())
+                 q)
+          (begin (set-mcar! q (mcdr (mcar q)))
+                 q))))
+
+
+(define q (make-queue))
+(insert-queue! q 1)
+(insert-queue! q 2)
+
+|#
+
+#|
+(define (front-ptr queue) (mcar queue))
+(define (rear-ptr queue) (mcdr queue))
+(define (set-front-ptr! queue item) (set-mcar! queue item))
+(define (set-rear-ptr! queue item) (set-mcdr! queue item))
+
+(define (empty-queue? queue) (null? (front-ptr queue)))
+
+(define (make-queue) (mcons '() '()))
+
+(define (front-queue queue)
+  (if (empty-queue? queue)
+      (error "FRONT called with an empty queue" queue)
+      (mcar (front-ptr queue))))
+
+(define (insert-queue! queue item)
+  (let ((new-pair (mcons item '())))
+    (cond ((empty-queue? queue) 
+           (set-front-ptr! queue new-pair)
+           (set-rear-ptr! queue new-pair)
+           queue)
+          (else (set-mcdr! (rear-ptr queue) new-pair)
+                (set-rear-ptr! queue new-pair)
+                queue))))
+
+(define (delete-queue! queue)
+  (cond ((empty-queue? queue)
+         (error "DELETE! called with an empty queue" queue))
+        (else (set-front-ptr! queue (mcdr (front-ptr queue)))
+              queue)))
+
+(define (print-queue queue)
+  (front-ptr queue))
+
+(define (make-queue*)
+  (let ((front-ptr '())
+        (rear-ptr '()))
+    (define (set-front-ptr! item) (set! front-ptr item))
+    (define (set-rear-ptr! item) (set! rear-ptr item))
+    (define (empty-queue?) (null? front-ptr))
+    (define (front-queue)
+      (if (empty-queue?)
+          (error "FRONT called with an empty queue")
+          (mcar front-ptr)))
+    (define (insert-queue! item)
+      (let ((new-pair (mcons item '())))
+        (cond ((empty-queue?) 
+               (set-front-ptr! new-pair)
+               (set-rear-ptr! new-pair)
+               front-ptr)
+              (else (set-mcdr! rear-ptr new-pair)
+                    (set-rear-ptr! new-pair)
+                    front-ptr))))
+    (define (delete-queue!)
+      (cond ((empty-queue?)
+             (error "DELETE! called with an empty queue"))
+            (else (set-front-ptr! (mcdr front-ptr))
+                  front-ptr)))
+    (define (dispatch m)
+      (cond ((eq? m 'insert) insert-queue!)
+            ((eq? m 'delete) delete-queue!)
+            ((eq? m 'empty?) empty-queue?)
+            ((eq? m 'front) front-queue)))
+    dispatch))
+
+|#
+
+;; Deque
+(define (make-deque) (mcons '() '()))
+(define (front-ptr deque) (mcar deque))
+(define (rear-ptr deque) (mcdr deque))
+(define (set-front-ptr! deque loc) (set-mcar! deque loc))
+(define (set-rear-ptr! deque loc) (set-mcdr! deque loc))
+(define (empty-deque? d) (and (empty? (front-ptr d))
+                              (empty? (rear-ptr d))))
+
+;; Element methods
+(define (make-elt data fwd-ptr back-ptr)
+  (mlist data fwd-ptr back-ptr))
+
+(define (get-elt-data elt)
+  (mcar elt))
+
+(define (set-fwd-ptr! elt loc)
+  (let ((fwd-ptr (mcdr elt)))
+    (set-mcar! fwd-ptr loc)
+    elt))
+
+(define (set-back-ptr! elt loc)
+  (let ((back-ptr (mcdr (mcdr elt))))
+    (set-mcar! back-ptr loc)
+    elt))
+
+(define (back-ptr elt)
+  (mcar (mcdr (mcdr elt))))
+
+(define (fwd-ptr elt)
+  (mcar (mcdr elt)))
+
+;; Deque operations
+(define (insert-front! deq data)
+  (let ((new-elt (make-elt data '() '())))
+    (if (empty-deque? deq)
+        (begin (set-front-ptr! deq new-elt)
+               (set-rear-ptr! deq new-elt)
+               deq)
+        (let ((first-elt (front-ptr deq)))
+          (begin (set-front-ptr! deq new-elt)
+                 (set-back-ptr! new-elt first-elt)
+                 (set-fwd-ptr! first-elt new-elt)
+                 deq)))))
+
+(define (delete-front! deq)
+  (if (empty-deque? deq)
+      (error "Nothing to delete")
+      (let* ((front-elt (front-ptr deq))
+             (new-front-elt (back-ptr front-elt)))
+        (if (empty? new-front-elt) ;if we've reached the last element
+            (begin (set-front-ptr! deq '())
+                   (set-rear-ptr! deq '()))
+            (begin (set-fwd-ptr! new-front-elt '())
+                   (set-front-ptr! deq new-front-elt)
+                   deq)))))
+
+(define (peek-front deq)
+  (if (empty-deque? deq)
+      (error "No data")
+      (get-elt-data (front-ptr deq))))
+
+(define (insert-rear! deq data)
+  (let ((new-elt (make-elt data '() '())))
+    (if (empty-deque? deq)
+        (begin (set-front-ptr! deq new-elt)
+               (set-rear-ptr! deq new-elt)
+               deq)
+        (let ((first-elt (rear-ptr deq)))
+          (begin (set-rear-ptr! deq new-elt)
+                 (set-fwd-ptr! new-elt first-elt)
+                 (set-back-ptr! first-elt new-elt)
+                 deq)))))
+
+(define (delete-rear! deq)
+  (if (empty-deque? deq)
+      (error "Nothing to delete")
+      (let* ((front-elt (rear-ptr deq))
+             (new-front-elt (fwd-ptr front-elt)))
+        (if (empty? new-front-elt) ;if we've reached the last element
+            (begin (set-front-ptr! deq '())
+                   (set-rear-ptr! deq '()))
+            (begin (set-back-ptr! new-front-elt '())
+                   (set-rear-ptr! deq new-front-elt)
+                   deq)))))
+
+(define (peek-rear deq)
+  (if (empty-deque? deq)
+      (error "No data")
+      (get-elt-data (rear-ptr deq))))
+  
+        
+;; Test Code
+(define d (make-deque))
+(insert-front! d 4)  
+(insert-front! d 5)
+(insert-front! d 6)
+(insert-rear! d 3)
+(insert-rear! d 2)
+(insert-rear! d 1)
+
+(define (get-all-elts deq)
+  (if (empty-deque? deq)
+      '()
+      (let ((data (peek-rear deq)))
+        (delete-rear! deq)
+        (cons data (get-all-elts d)))))
+             
+    
+         
+    
+
+

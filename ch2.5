@@ -1,0 +1,542 @@
+#lang racket
+
+;; Utility functions
+
+(define (square x) (* x x))
+
+(define (variable? x) (symbol? x))
+
+(define (same-variable? a b) 
+  (and (variable? a) 
+       (variable? b)
+       (eq? a b)))
+
+
+;;; Generic utility functions
+
+(define *ops-table* (make-hash))
+
+(define (put oper types procedure)
+  (hash-set! *ops-table* (list oper types) procedure))
+
+(define (get oper types)
+  (hash-ref *ops-table* (list oper types) #f))
+
+(define *coercion-table* (make-hash))
+
+(define (put-coercion type1 type2 procedure)
+  (hash-set! *coercion-table* (list type1 type2) procedure))
+
+(define (get-coercion type1 type2)
+  (hash-ref *coercion-table* (list type1 type2) #f))
+
+
+(define (attach-tag tag datum)
+  (cons tag datum))
+
+(define (type-tag datum)
+  (if (number? datum)
+      'scheme-number
+      (car datum)))
+
+
+(define (contents datum)
+  (if (number? datum)
+      datum
+      (cdr datum)))
+
+; Simple 
+(define (apply-generic-simple op . args)
+  (let ((type-tags (map type-tag args)))
+    (let ((proc (get op type-tags)))
+      (if proc
+          (apply proc (map contents args))
+          (error "No such operation" (list op type-tags))))))
+
+(define (apply-generic op . args)
+  (let ((type-tags (map type-tag args)))
+    (let ((proc (get op type-tags)))
+      (if proc
+          (apply proc (map contents args))
+          (if (= (length args) 2)
+              (let ((type1 (car type-tags))
+                    (type2 (cadr type-tags))
+                    (arg1 (car args))
+                    (arg2 (cadr args)))
+                (let ((type1->type2 (get-coercion type1 type2))
+                      (type2->type1 (get-coercion type2 type1)))
+                  (cond (type1->type2 
+                         (apply-generic op (type1->type2 arg1) arg2))
+                        (type2->type1 
+                         (apply-generic (list op arg1 arg2)))
+                        (else (error "Couldn't find operation -- apply-generic" (list op args))))))
+              (error "No such op -- apply-generic" (list op args)))))))
+                                    
+
+;;; Packages
+
+;; Coercions
+
+(put-coercion 'scheme-number 'complex (lambda (x) (make-complex-from-real-imag (contents x) 0)))
+
+
+;; Scheme Numbers Package
+
+(define (install-scheme-number-package)
+  (define (gcd a b)
+  (if (= b 0)
+      a
+      (gcd b (remainder a b))))
+  (define (tag x)
+    x)
+  (put 'add '(scheme-number scheme-number)
+       (lambda (x y) (tag (+ x y))))
+  (put 'sub '(scheme-number scheme-number)
+       (lambda (x y) (tag (- x y))))
+  (put 'mul '(scheme-number scheme-number)
+       (lambda (x y) (tag (* x y))))
+  (put 'div '(scheme-number scheme-number)
+       (lambda (x y) (tag (/ x y))))
+  (put 'raise '(scheme-number) (lambda (x) (make-rational x 1)))
+  (put 'equ? '(scheme-number scheme-number) (lambda (x y) (= x y)))
+  (put '=zero? '(scheme-number) (lambda (x) (= x 0)))
+  (put 'negate '(scheme-number) (lambda (x) (tag (- x))))
+  (put 'div '(scheme-number scheme-number) (lambda (x y) (tag (/ x y))))
+  (put 'greatest-common-divisor '(scheme-number scheme-number) (tag (lambda (x y) (gcd x y))))
+  (put 'reduce '(scheme-number scheme-number) 
+       (lambda (a b) 
+         (let ((ab-gcd (gcd a b)))
+           (list (/ a ab-gcd) (/ b ab-gcd)))))
+  (put 'make 'scheme-number (lambda (x) (tag x)))
+  'done-scheme-number)
+
+;; Rational Package
+
+(define (install-rational-package)
+  ;; internal procedures
+  (define (numer x) (car x))
+  (define (denom x) (cdr x))
+  (define (make-rat n d)
+    (let ((reduced-nd (reduce n d)))
+      (cons (car reduced-nd)
+            (cadr reduced-nd))))
+  (define (add-rat x y)
+    (make-rat (add (mul (numer x) (denom y))
+                 (mul (numer y) (denom x)))
+              (mul (denom x) (denom y))))
+  (define (sub-rat x y)
+    (make-rat (sub (mul (numer x) (denom y))
+                 (mul (numer y) (denom x)))
+              (mul (denom x) (denom y))))
+  (define (mul-rat x y)
+    (make-rat (mul (numer x) (numer y))
+              (mul (denom x) (denom y))))
+  (define (div-rat x y)
+    (make-rat (mul (numer x) (denom y))
+              (mul (denom x) (numer y))))
+  (define (rat-equ? x y)
+    (and (equ? (numer x) (numer y))
+         (equ? (denom x) (denom y))))
+  (define (=zero-rat? x)
+    (=zero? (numer x)))
+  (define (negate x)
+    (make-rat (sub (numer x))
+              (denom x)))
+  ;; interface to rest of the system
+  (define (tag x) (attach-tag 'rational x))
+  (put 'add '(rational rational)
+       (lambda (x y) (tag (add-rat x y))))
+  (put 'sub '(rational rational)
+       (lambda (x y) (tag (sub-rat x y))))
+  (put 'mul '(rational rational)
+       (lambda (x y) (tag (mul-rat x y))))
+  (put 'div '(rational rational)
+       (lambda (x y) (tag (div-rat x y))))
+  (put 'equ? '(rational rational) equ?)
+  (put 'raise '(rational) (lambda (x) (make-complex-from-real-imag (/ (numer x) (denom x)) 0)))
+  (put 'project '(rational) (lambda (x) (make-scheme-number (floor (/ (numer x) (denom x))))))
+  (put '=zero? '(rational) =zero?)
+  (put 'negate '(rational) (lambda (x) (tag (negate x))))
+  (put 'make 'rational
+       (lambda (n d) (tag (make-rat n d))))
+  'done-rational)
+
+;; Rectangular Package
+
+(define (install-rectangular-package)
+  ;; internal procedures
+  (define (make-from-real-imag real imag)
+    (cons real imag))
+  (define (make-from-mag-ang r a) 
+    (cons (* r (cos a)) (* r (sin a))))
+  (define (real-part z) (car z))
+  (define (imag-part z) (cdr z))
+  (define (magnitude z) (sqrt (+ (square (real-part z)) (square (imag-part z)))))
+  (define (angle z) (atan (/ (imag-part z) (real-part z))))
+  (define (negate z) (make-from-real-imag (- (real-part z)) (- (imag-part z))))
+  ;; external interface
+  (define (tag x) (attach-tag 'rectangular x))
+  (put 'real-part '(rectangular) real-part)
+  (put 'imag-part '(rectangular) imag-part)
+  (put 'magnitude '(rectangular) magnitude)
+  (put 'angle '(rectangular) angle)
+  (put 'make 'rectangular (lambda (real-part imag-part) 
+                            (tag (make-from-real-imag real-part imag-part))))
+  (put 'make-mag-ang 'rectangular (lambda (magnitude angle)
+                                    (tag (make-from-mag-ang magnitude angle))))
+  (put 'negate '(rectangular) (lambda (z) (tag (negate z))))
+  'done-rectangular)
+
+(define (install-polar-package)
+  ;; internal procedures
+  (define (make-from-real-imag real imag)
+    (cons (sqrt (+ (square real) (square imag)))
+          (atan (/ imag real))))
+  (define (make-from-mag-ang mag ang)
+    (cons mag ang))
+  (define (real-part z)
+    (* (car z) (cos (cdr z))))
+  (define (imag-part z)
+    (* (car z) (sin (cdr z))))
+  (define (magnitude z)
+    (car z))
+  (define (angle z)
+    (cdr z))
+  (define (negate z)
+    (make-from-mag-ang (magnitude z) (+ (angle z) 3.14159)))
+  ;; external interface
+  (define (tag x) (attach-tag 'polar x))
+  (put 'make 'polar (lambda (mag ang)
+                      (tag (make-from-mag-ang mag ang))))
+  (put 'real-part '(polar) real-part)
+  (put 'imag-part '(polar) imag-part)
+  (put 'magnitude '(polar) magnitude)
+  (put 'angle '(polar) angle)
+  (put 'negate '(polar) (lambda (z) (tag (negate z))))
+  'polar-done)
+
+
+(define (install-complex-package)
+  ;;internal procedures
+  (define (add-complex z1 z2)
+    (make-rect-real-imag (+ (real-part z1) (real-part z2))
+                         (+ (imag-part z1) (imag-part z2))))
+  (define (sub-complex z1 z2)
+    (make-rect-real-imag (- (real-part z1) (real-part z2))
+                         (- (imag-part z1) (imag-part z2))))
+  (define (mul-complex z1 z2)
+    (make-polar-mag-ang (* (magnitude z1) (magnitude z2))
+                       (+ (angle z1) (angle z2))))
+  (define (div-complex z1 z2)
+    (make-polar-mag-ang (/ (magnitude z1) (magnitude z2))
+                       (- (angle z1) (angle z2))))
+  (define (equ? z1 z2)
+    (and (= (real-part z1) (real-part z2))
+         (= (imag-part z1) (imag-part z2))))
+  (define (=zero? z)
+    (and (= (real-part z) 0)
+         (= (imag-part z) 0)))
+  (define (negate-complex x)
+    (negate x))
+  ;; external interface
+  (define (tag x) (attach-tag 'complex x))
+  (put 'add '(complex complex) 
+       (lambda (z1 z2) (tag (add-complex z1 z2))))
+  (put 'sub '(complex complex)
+       (lambda (z1 z2) (tag (sub-complex z1 z2))))
+  (put 'mul '(complex complex)
+       (lambda (z1 z2) (tag (mul-complex z1 z2))))
+  (put 'div '(complex complex)
+       (lambda (z1 z2) (tag (div-complex z1 z2))))
+  (put 'equ? '(complex complex) equ?)
+  (put 'make-rect 'complex (lambda (real imag) (tag ((get 'make 'rectangular) real imag))))
+  (put 'make-polar 'complex (lambda (mag ang) (tag ((get 'make 'polar) mag ang))))
+  (put 'project '(complex) (lambda (x) (make-rational (real-part x) 1)))
+  (put 'negate '(complex) (lambda (x) (tag (negate-complex x))))
+  (put '=zero? '(complex) =zero?)
+  'done-complex)
+
+; Polynomial Package
+
+(define (install-polynomial-package)
+  ;; internal procedures
+  (define (make-poly variable term-list)
+    (cons variable term-list))
+  (define (variable p) (car p))
+  (define (term-list p) (cdr p))
+  (define (add-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (make-poly (variable p1)
+                   (add-terms (term-list p1)
+                              (term-list p2)))
+        (error "Polys not in the same var -- ADD-POLY"
+               (list p1 p2))))
+  (define (sub-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (make-poly (variable p1)
+                   (add-terms (term-list p1)
+                              (negate-terms (term-list p2))))
+        (error "Polys not in the same var -- SUB-POLY")))
+  (define (mul-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (make-poly (variable p1)
+                   (mul-terms (term-list p1)
+                              (term-list p2)))
+        (error "Polys not in the same var -- MUL-POLY"
+               (list p1 p2))))
+  (define (zero-poly? poly)
+    (let ((tl (term-list poly)))
+      (if (empty-termlist? tl)
+          #t
+          (and (=zero? (coeff (first-term tl)))
+               (zero-poly? (make-poly (variable poly) (rest-terms tl)))))))
+  (define (div-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (let ((div-result (div-terms (term-list p1)
+                                     (term-list p2))))
+          (list (make-poly (variable p1) (car div-result))
+                (make-poly (variable p1) (cadr div-result))))
+        (error "Polys not in the same var -- DIV-POLY")))
+  (define (gcd-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (let ((terms-p1 (term-list p1))
+              (terms-p2 (term-list p2)))
+          (make-poly (variable p1) (gcd-terms terms-p1 terms-p2)))
+        (error "Polys not in the same var -- GCD-POLY")))
+  (define (reduce-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+        (let* ((terms-p1 (term-list p1))
+              (terms-p2 (term-list p2))
+              (reduced-results (reduce-terms terms-p1 terms-p2)))
+          (list (make-poly (variable p1) (car reduced-results))
+                (make-poly (variable p1) (cadr reduced-results))))
+        (error "Polys not in the same var -- reduce-poly")))
+  ;; Helper functions
+  (define (add-terms L1 L2)
+    (cond ((empty-termlist? L1) L2)
+          ((empty-termlist? L2) L1)
+          (else
+           (let ((t1 (first-term L1))
+                 (t2 (first-term L2)))
+             (cond ((> (order t1) (order t2))
+                    (adjoin-term t1 
+                                 (add-terms (rest-terms L1) L2)))
+                   ((< (order t1) (order t2))
+                    (adjoin-term t2 (add-terms L1 (rest-terms L2))))
+                   (else (adjoin-term
+                          (make-term (order t1)
+                                     (add (coeff t1) (coeff t2)))
+                          (add-terms (rest-terms L1)
+                                     (rest-terms L2)))))))))
+  (define (mul-terms L1 L2)
+    (if (empty-termlist? L1)
+        (the-empty-termlist)
+        (add-terms (mul-term-by-all-terms (first-term L1) L2)
+                   (mul-terms (rest-terms L1) L2))))
+  (define (mul-term-by-all-terms t1 L)
+    (if (empty-termlist? L)
+        (the-empty-termlist)
+        (let ((t2 (first-term L)))
+          (adjoin-term
+           (make-term (+ (order t1) (order t2))
+                      (mul (coeff t1) (coeff t2)))
+           (mul-term-by-all-terms t1 (rest-terms L))))))
+  (define (div-terms L1 L2)
+    (if (empty-termlist? L1)
+        (list (the-empty-termlist) (the-empty-termlist))
+        (let ((t1 (first-term L1))
+              (t2 (first-term L2)))
+          (if (> (order t2) (order t1))
+              (list (the-empty-termlist) L1)
+              (let ((new-c (div (coeff t1) (coeff t2)))
+                    (new-o (- (order t1) (order t2))))
+                (let ((rest-of-result
+                       (div-terms (add-terms L1
+                                             (negate-terms 
+                                              (mul-term-by-all-terms (make-term new-o new-c) L2)))
+                                  L2)))
+                  (let ((result (car rest-of-result))
+                        (remainder (cadr rest-of-result)))
+                    (list (adjoin-term (make-term new-o new-c) result)
+                          remainder))))))))
+    
+  (define (negate-terms term-list)
+    (if (empty-termlist? term-list)
+        (the-empty-termlist)
+        (let ((term (first-term term-list))
+              (other-terms (rest-terms term-list)))
+          (adjoin-term (make-term (order term) (negate (coeff term)))
+                       (negate-terms (rest-terms term-list))))))
+  (define (remainder-terms L1 L2)
+    (let ((div-results (div-terms L1 L2)))
+      (cadr div-results)))
+  (define (pseudoremainder-terms L1 L2)
+    (let* ((O1 (order (first-term L1)))
+           (O2 (order (first-term L2)))
+           (c (coeff (first-term L2)))
+           (integerizing-factor (expt c (+ 1 (- O1 O2))))
+           (div-results (div-terms (mul-term-by-all-terms (make-term 0 integerizing-factor) L1) L2)))
+      (cadr div-results)))
+  (define (gcd-terms a b)
+    (if (empty-termlist? b)
+        a
+        (let* ((gcd-result (gcd-terms b (pseudoremainder-terms a b)))
+               (coeffs (map coeff gcd-result))
+               (coeff-gcd (apply gcd coeffs)))
+          (map (lambda (term) (make-term (order term) (/ (coeff term) coeff-gcd)))
+               gcd-result))))
+  (define (reduce-terms n d)
+    (let ((nd-gcd (gcd-terms n d)))
+        ; car contains quotient. gcd'd division never returns remainder
+      (list (car (div-terms n nd-gcd)) (car (div-terms d nd-gcd))))) 
+;;Sparse Terms 
+  (define (adjoin-term term term-list)
+    (if (=zero? (coeff term))
+        term-list
+        (cons term term-list)))
+  (define (the-empty-termlist) '())
+  (define (first-term term-list) (car term-list))
+  (define (rest-terms term-list) (cdr term-list))
+  (define (empty-termlist? term-list) (empty? term-list))
+  (define (make-term order coeff) (list order coeff))
+  (define (order term) (car term))
+  (define (coeff term) (cadr term))
+#|
+  (define (the-empty-termlist) '())
+  (define (first-term term-list) (list (- (length term-list) 1) (car term-list)))
+  (define (rest-terms term-list) (cdr term-list))
+  (define (empty-termlist? term-list) (empty? term-list))
+  (define (make-term order coeff) (list order coeff))
+  (define (order term) (car term))
+  (define (coeff term) (cadr term))
+  (define (adjoin-term term term-list)
+    (define (fill-list x count)
+      (if (= count 0)
+          '()
+          (cons x (fill-list x (- count 1)))))
+    (define (add-terms L1 L2)
+      (let ((len1 (length L1))
+            (len2 (length L2)))
+        (cond ((= len1 0) L2)
+               ((= len2 0) L1)
+               ((> len1 len2) (cons (car L1) (add-terms (cdr L1) L2)))
+               ((> len2 len1) (cons (car L2) (add-terms L1 (cdr L2))))
+               (else (cons (add (car L1) (car L2)) (add-terms (cdr L1) (cdr L2)))))))
+    (let ((expanded-term (cons (coeff term) (fill-list (make-scheme-number 0) (order term)))))
+      (if (=zero? (coeff term))
+          term-list
+          (add-terms expanded-term term-list))))
+|#  
+;; interface
+  (define (tag p) (attach-tag 'polynomial p))
+  (put 'add '(polynomial polynomial)
+       (lambda (p1 p2) (tag (add-poly p1 p2))))
+  (put 'sub '(polynomial polynomial)
+       (lambda (p1 p2) (tag (sub-poly p1 p2))))
+  (put 'mul '(polynomial polynomial)
+       (lambda (p1 p2) (tag (mul-poly p1 p2))))
+  (put 'div '(polynomial polynomial)
+       (lambda (p1 p2) (let ((div-result (div-poly p1 p2)))
+                         (list (tag (car div-result))
+                               (tag (cadr div-result))))))
+  (put '=zero? '(polynomial) zero-poly?)
+  (put 'greatest-common-divisor '(polynomial polynomial) (lambda (a b) (tag (gcd-poly a b))))
+  (put 'make 'polynomial (lambda (var terms) (tag (make-poly var terms))))
+  (put 'reduce '(polynomial polynomial) 
+       (lambda (a b)
+         (let ((reduced-results (reduce-poly a b)))
+           (list (tag (car reduced-results))
+                 (tag (cadr reduced-results))))))
+  'done-polynomial)
+
+
+;; Generic procedures
+
+(define make-rect-real-imag (lambda (x y) ((get 'make 'rectangular) x y)))
+
+(define make-polar-mag-ang (lambda (x y) ((get 'make 'polar) x y)))
+
+(define (make-complex-from-real-imag real-part imag-part)
+  ((get 'make-rect 'complex) real-part imag-part))
+
+(define (make-complex-from-mag-ang magnitude angle)
+  ((get 'make-polar 'complex) magnitude angle))
+
+(define (real-part x)
+  (apply-generic 'real-part x))
+
+(define (imag-part x)
+  (apply-generic 'imag-part x))
+
+(define (make-scheme-number x)
+  ((get 'make 'scheme-number) x))
+
+(define (make-rational n d)
+  ((get 'make 'rational) n d))
+
+(define (make-polynomial var terms)
+  ((get 'make 'polynomial) var terms))
+
+(define (add x y)
+  (apply-generic 'add x y))
+
+(define (sub x y)
+  (apply-generic 'sub x y))
+
+(define (mul x y)
+  (apply-generic 'mul x y))
+
+(define (equ? x y)
+  (apply-generic 'equ? x y))
+
+(define (raise x)
+  (apply-generic 'raise x))
+
+(define (project x)
+  (let ((proc (get 'project (list (type-tag x)))))
+    (if proc
+        (apply-generic 'project x)
+        #f)))
+
+(define (drop x)
+  (let ((project-proc (get 'project (list (type-tag x)))))
+    (if project-proc
+        (let ((projection (project x)))
+          (let ((raised (raise projection)))
+            (if (equ? raised x)
+                (drop projection)
+                x)))
+        x)))
+
+(define (=zero? x)
+  (apply-generic '=zero? x))
+
+(define (negate x)
+  (apply-generic 'negate x))
+
+(define (div x y)
+  (apply-generic 'div x y))
+
+(define (greatest-common-divisor x y)
+  (apply-generic 'greatest-common-divisor x y))
+
+(define (reduce x y)
+  (apply-generic 'reduce x y))
+
+
+(install-rectangular-package)
+(install-polar-package)
+(install-complex-package)
+(install-scheme-number-package)
+(install-rational-package)
+(install-polynomial-package)
+
+(define p1 (make-polynomial 'x '((1 1)(0 1))))
+(define p2 (make-polynomial 'x '((3 1)(0 -1))))
+(define p3 (make-polynomial 'x '((1 1))))
+(define p4 (make-polynomial 'x '((2 1)(0 -1))))
+
+(define rf1 (make-rational p1 p2))
+(define rf2 (make-rational p3 p4))
+
+(add rf1 rf2)
